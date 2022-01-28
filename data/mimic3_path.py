@@ -2,7 +2,7 @@ import pandas as pd
 # The path to the MIMIC 3 Data folders, as formatted by https://github.com/YerevaNN/mimic3-benchmarks
 # The root dir for all of the FORMATTED MIMIC3-data
 root = '../../mimic3-benchmarks/data/'
-root = '/mnt/sdd/MSc_projects/jbarker/code//mimic3-benchmarks/data/'
+root = '/mnt/sdd/MSc_projects/jbarker/code/mimic3-benchmarks/data/'
 
 # A list of sub folders, one for each of the tasks commonly performed on the MIMIC3 dataset
 task_names = ['in-hospital-mortality','length-of-stay','phenotyping']
