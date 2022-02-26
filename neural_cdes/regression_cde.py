@@ -20,8 +20,8 @@ class F(torch.nn.Module):
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
 
-        self.linear1 = torch.nn.Linear(hidden_channels, 128)
-        self.linear2 = torch.nn.Linear(128, input_channels * hidden_channels)
+        self.linear1 = torch.nn.Linear(hidden_channels, 12)
+        self.linear2 = torch.nn.Linear(12, input_channels * hidden_channels)
 
     def forward(self, t, z):
         '''
@@ -30,7 +30,7 @@ class F(torch.nn.Module):
         :return: F(z)
         '''
         z = self.linear1(z)
-        z = z.relu()
+        z = z.tanh()
         z = self.linear2(z)
 
         # Tip from authors - best results tend to be obtained by adding a final tanh nonlinearity.

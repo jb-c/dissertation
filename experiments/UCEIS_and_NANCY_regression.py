@@ -12,6 +12,9 @@ import matplotlib.pyplot as plt
 import torch
 import torchcde
 
+print(f'IS CUDA = {torch.cuda.is_available()}')
+device = torch.device("cuda:0")
+
 from tqdm import tqdm
 
 from neural_cdes.regression_cde import NeuralCDEModel
@@ -29,8 +32,8 @@ lookback_window_in_days = 2*365
 num_hidden_channels = 4
 interpolation_method = 'cubic'
 
-num_epochs = 2
-def main():
+
+def main(num_epochs = 5):
     # -----------------------------------------------------------------------------------
     #                               Loading & Parsing Data
     # -----------------------------------------------------------------------------------
@@ -48,11 +51,15 @@ def main():
     X_tensor = torch.from_numpy(X).float()
     y_tensor = torch.from_numpy(y).float()
 
+    X_tensor = X_tensor.to(device)
+    y_tensor = y_tensor.to(device)
+
     # -----------------------------------------------------------------------------------
     #                              Load Model & Prep Data
     # -----------------------------------------------------------------------------------
     model = NeuralCDEModel(input_channels = X_tensor.size(-1), hidden_channels = num_hidden_channels,
                            output_channels = y_tensor.size(-1), interpolation_method=interpolation_method)
+    model.to(device)
     optimizer = torch.optim.Adam(model.parameters())
 
     # Prep data by turning it into a continuous path
@@ -60,21 +67,28 @@ def main():
         coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(X_tensor)
 
     dataset = torch.utils.data.TensorDataset(coeffs, y_tensor)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=32)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
 
     # -----------------------------------------------------------------------------------
     #                                  Training
     # -----------------------------------------------------------------------------------
-    for epoch in tqdm(range(num_epochs), desc='EPOCH'):
-        for i, batch in tqdm(enumerate(dataloader), desc='BATCH', leave=bool(i == num_epochs - 1)):
+    import  time
+    start_time = time.time()
+    # your code
+
+    print('Starting Training')
+    for epoch in range(num_epochs):
+        for i, batch in enumerate(dataloader):
             batch_coeffs, batch_y = batch
             pred_y = model(batch_coeffs).squeeze(-1)
-
             loss = torch.nn.functional.mse_loss(pred_y, batch_y)
+            print(f'\t Perfoming backprop for batch {i+1}/{len(dataloader)}')
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-            print('Epoch: {}   Training loss: {}'.format(epoch, loss.item()))
+            elapsed_time = time.time() - start_time
+            print(f'Epoch: {epoch+1}/{num_epochs}  Batch: {i+1}/{len(dataloader)} Training loss: {loss.item()} Elapsed Time : {np.round(elapsed_time / 60,2)} mins')
+
 
     return model
 
