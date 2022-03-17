@@ -12,15 +12,14 @@ from sklearn.preprocessing import StandardScaler
 from pytorch_forecasting.metrics import MAPE
 from datetime import datetime
 
-import torch
-import torchcde
+import torch, torchcde, time, os
 
-device = torch.device("cuda:0")
+device = torch.device("cuda")
 
 from tqdm import tqdm
 
-from neural_cdes.regression_cde import NeuralCDEModel
-from data.truecolours_parser import load_for_forecasting,load_for_NANCY_UCEIS_regression
+from neural_cdes.regression_cde import CDEModel as NeuralCDEModel
+from load_data_into_tensors import return_X_y_train_and_test
 
 #-----------------------------------------------------------------------------------------------------------------------
 #
@@ -28,92 +27,105 @@ from data.truecolours_parser import load_for_forecasting,load_for_NANCY_UCEIS_re
 #
 #-----------------------------------------------------------------------------------------------------------------------
 
-pickle_path = '/mnt/sdd/MSc_projects/jbarker/code/dissertation/data/UC_and_CD_df.p'
+time_now = datetime.today().strftime("%Y_%m_%d_%H:%M")
 save_dir    = '/mnt/sdd/MSc_projects/jbarker/code/dissertation/experiments/saved_models'
-lookback_window_in_days = 365
+save_folder = f'{save_dir}/{time_now}'
 
+if (not os.path.exists(save_folder)) and (__name__ == '__main__'):
+    os.mkdir(save_folder)
+
+save_every_k_epochs = 1
 num_hidden_channels = 32
 interpolation_method = 'cubic'
 
 
-def main(num_epochs = 5, train_frac = 0.8):
-    # -----------------------------------------------------------------------------------
-    #                               Loading & Parsing Data
-    # -----------------------------------------------------------------------------------
-    X,y =  load_for_NANCY_UCEIS_regression(path_to_pickle=pickle_path, lookback_window=lookback_window_in_days)
-
-
-    # Need to make all timeseries the same length (for batching) we ffill as dX_t = 0 and so has no impact on model
-    max_length = np.max([len(xi) for xi in X])
-    for i in range(len(X)):
-        ffill_df = X[i].iloc[np.repeat(-1,max_length - len(X[i]))] # The last row of xi repeated correct # times
-        X[i] = pd.concat([X[i],ffill_df],ignore_index=True)
-    X = np.stack(X)
-
-
-    X_tensor = torch.from_numpy(X).float()
-    y_tensor = torch.from_numpy(y).float()
-    X_tensor = torch.nn.functional.normalize(X_tensor)
-    y_tensor = torch.nn.functional.normalize(y_tensor)
-    X_tensor = X_tensor.to(device)
-    y_tensor = y_tensor.to(device)
-
-    print(f'X.shape = {X.shape}\ny.shape = {y.shape}')
+def main(num_epochs = 5, batch_size = 50, sde = False, dropout_p = 0.5):
+    '''
+    Main training method for a neural CDE
+    '''
 
     # -----------------------------------------------------------------------------------
-    #                              Load Model & Prep Data
+    #                              Prep Data
     # -----------------------------------------------------------------------------------
-    model = NeuralCDEModel(input_channels = X_tensor.size(-1), hidden_channels = num_hidden_channels,
-                           output_channels = y_tensor.size(-1), interpolation_method=interpolation_method)
-    model.to(device)
-    optimizer = torch.optim.Adam(model.parameters())
+    X_train, X_test, y_train, y_test = return_X_y_train_and_test(lookback_window_in_days=500,test_frac=0.15,random_state=42)
+
+    # Move tensors to GPU
+    X_train=X_train.to(device);X_test=X_test.to(device)
+    y_train=y_train.to(device);y_test=y_test.to(device)
 
     # Prep data by turning it into a continuous path
     if interpolation_method == 'cubic':
-        coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(X_tensor)
+        train_coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(X_train)
+        test_coeffs  = torchcde.hermite_cubic_coefficients_with_backward_differences(X_test)
 
-    dataset = torch.utils.data.TensorDataset(coeffs, y_tensor)
+    train_dataset = torch.utils.data.TensorDataset(train_coeffs, y_train)
+    test_dataset = torch.utils.data.TensorDataset(test_coeffs, y_test)
+    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size)
 
-    train_size = int(train_frac * len(dataset))
-    test_size = len(dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+    # -----------------------------------------------------------------------------------
+    #                                   Load Model
+    # -----------------------------------------------------------------------------------
+    if sde:
+        model = NeuralCDEModel(input_channels = X_train.size(-1), hidden_channels = num_hidden_channels,
+                               output_channels = y_train.size(-1), interpolation_method=interpolation_method,
+                               sde=True,adjoint=True,method='reversible_heun',dropout_p = dropout_p,dt=0.05)
+    else:
+        model = NeuralCDEModel(input_channels = X_train.size(-1), hidden_channels = num_hidden_channels,
+                               output_channels = y_train.size(-1), interpolation_method=interpolation_method,dt=0.05)
 
-    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=50)
+    model.to(device)
+    optimizer = torch.optim.Adam(model.parameters())
 
     # -----------------------------------------------------------------------------------
     #                                  Training
     # -----------------------------------------------------------------------------------
-    import  time
     start_time = time.time()
-
-
     print(f'Starting Training on {len(train_dataset)} samples and testing on {len(test_dataset)} samples')
+
+    history = pd.DataFrame(columns=['epoch','train_loss','test_loss'])
+
     for epoch in range(num_epochs):
-        for i, batch in enumerate(dataloader):
+        for i, batch in tqdm(enumerate(dataloader),desc='\tBatch : '):
+            #############################################################
             batch_coeffs, batch_y = batch
             pred_y = model(batch_coeffs).squeeze(-1)
             loss = torch.nn.functional.mse_loss(pred_y, batch_y)
-            print(f'\t Perfoming backprop for batch {i+1}/{len(dataloader)}')
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            #############################################################
+
             elapsed_time = time.time() - start_time
-            print(f'Epoch: {epoch+1}/{num_epochs}  Batch: {i+1}/{len(dataloader)} Training loss: {loss.item()} Elapsed Time : {np.round(elapsed_time / 60,2)} mins')
 
-            # Make test predictions
-            test_coeffs, test_y = test_dataset[:]
-            pred_y_test = model(test_coeffs).squeeze(-1)
-            test_loss_MAPE = MAPE()(pred_y_test, test_y)
-            test_loss_MSE  = torch.nn.functional.mse_loss(pred_y_test, test_y)
-            print(f'\t Test loss MAPE : {test_loss_MAPE} and Test loss MSE : {test_loss_MSE}')
+        # Make test predictions
+        pred_y_train = model(train_coeffs).squeeze(-1)
+        pred_y_test = model(test_coeffs).squeeze(-1)
+        train_loss = torch.nn.functional.mse_loss(pred_y_train, y_train)
+        test_loss = torch.nn.functional.mse_loss(pred_y_test, y_test)
+        history.loc[len(history)] = [i+1,loss.item(), test_loss.item()]
+
+        print(f'Epoch: {epoch+1}/{num_epochs}  Batch: {i+1}/{len(dataloader)} Training loss: {train_loss.item()} Test Loss: {test_loss.item()} Elapsed Time : {np.round(elapsed_time / 60,2)} mins')
 
 
-    return model, coeffs, X_tensor, y_tensor
+        if ((epoch+1)%save_every_k_epochs) == 0:
+            save_model(model, save_folder, f'_at_epoch_{epoch+1}')
+            print('\t\t Saved a Checkpoint')
+
+    return model, history
+
+
+
+def save_model(model, save_folder, name):
+    '''
+    Quick Wrapper to Save a Model To a dir
+    '''
+    torch.save(model.state_dict(), f'{save_folder}/model{name}.p')
+    torch.save({'input_channels': model.func.input_channels, 'hidden_channels': model.func.hidden_channels,'output_channels': model.output_channels,
+                'interpolation_method': model.interpolation_method,'sde':model.is_sde,'dropout_p':model.dropout_p}, f'{save_folder}/args{name}.p')
+
 
 if __name__ == '__main__':
-    model, coeffs, X_tensor, y_tensor = main(10,0.9)
-    time_now = datetime.today().strftime("%Y_%m_%d_%H:%M")
-    torch.save(model.state_dict(), f'{save_dir}/model_{time_now}.p')
-    torch.save({'input_channels': model.func.input_channels, 'hidden_channels': model.func.hidden_channels,
-                'output_channels': model.output_channels, 'interpolation_method': model.interpolation_method},
-               f'{save_dir}/args_{time_now}.p')
+    model, history = main(num_epochs = 50, batch_size = 50, sde = True, dropout_p = 0.5)
+    save_model(model,save_folder,'')
+    history.to_csv(f'{save_folder}/history.csv',index=False)
+
