@@ -19,7 +19,7 @@ device = torch.device("cuda")
 from tqdm import tqdm
 
 from neural_cdes.regression_cde import CDEModel as NeuralCDEModel
-from load_data_into_tensors import return_X_y_train_and_test
+from data.preprocessing.load_for_training import load_data
 
 #-----------------------------------------------------------------------------------------------------------------------
 #
@@ -47,7 +47,7 @@ def main(num_epochs = 5, batch_size = 50, sde = False, dropout_p = 0.5):
     # -----------------------------------------------------------------------------------
     #                              Prep Data
     # -----------------------------------------------------------------------------------
-    X_train, X_test, y_train, y_test = return_X_y_train_and_test(lookback_window_in_days=500,test_frac=0.15,random_state=42)
+    X_train, X_test, y_train, y_test = load_data(data_source='tc',return_tensors=True,lookback_window_in_days=500,update_pickle=True)
 
     # Move tensors to GPU
     X_train=X_train.to(device);X_test=X_test.to(device)
@@ -68,10 +68,10 @@ def main(num_epochs = 5, batch_size = 50, sde = False, dropout_p = 0.5):
     if sde:
         model = NeuralCDEModel(input_channels = X_train.size(-1), hidden_channels = num_hidden_channels,
                                output_channels = y_train.size(-1), interpolation_method=interpolation_method,
-                               sde=True,adjoint=True,method='reversible_heun',dropout_p = dropout_p,dt=0.05)
+                               sde=True,adjoint=True,method='reversible_heun',dropout_p = dropout_p,dt=0.1)
     else:
         model = NeuralCDEModel(input_channels = X_train.size(-1), hidden_channels = num_hidden_channels,
-                               output_channels = y_train.size(-1), interpolation_method=interpolation_method,dt=0.05)
+                               output_channels = y_train.size(-1), interpolation_method=interpolation_method)
 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters())
@@ -87,6 +87,7 @@ def main(num_epochs = 5, batch_size = 50, sde = False, dropout_p = 0.5):
     for epoch in range(num_epochs):
         for i, batch in tqdm(enumerate(dataloader),desc='\tBatch : '):
             #############################################################
+            optimizer.zero_grad()
             batch_coeffs, batch_y = batch
             pred_y = model(batch_coeffs).squeeze(-1)
             loss = torch.nn.functional.mse_loss(pred_y, batch_y)
@@ -125,7 +126,8 @@ def save_model(model, save_folder, name):
 
 
 if __name__ == '__main__':
-    model, history = main(num_epochs = 50, batch_size = 50, sde = True, dropout_p = 0.5)
+    model, history = main(num_epochs = 100, batch_size = 50, sde = True, dropout_p = 0.5)
     save_model(model,save_folder,'')
     history.to_csv(f'{save_folder}/history.csv',index=False)
-
+    print('Finished Training')
+    torch.cuda.empty_cache()

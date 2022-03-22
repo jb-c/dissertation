@@ -19,14 +19,14 @@ class F(torch.nn.Module):
         :param input_channels: the number of input channels in the data X. (Determined by the data.)
         :param hidden_channels: the number of channels for z_t. (Determined by you!)
         '''
-        torch.manual_seed(3)
+        #torch.manual_seed(3)
         super(F, self).__init__()
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
 
-        self.linear1 = torch.nn.Linear(hidden_channels, 128)
-        self.linear2 = torch.nn.Linear(128, 128)
-        self.linear3 = torch.nn.Linear(128, input_channels * hidden_channels)
+        self.linear1 = torch.nn.Linear(hidden_channels, 256)
+        self.linear2 = torch.nn.Linear(256, 256)
+        self.linear3 = torch.nn.Linear(256, input_channels * hidden_channels)
 
     def forward(self, t, z):
         '''
@@ -55,7 +55,7 @@ class CDEModel(torch.nn.Module):
     '''
     def __init__(self,input_channels, hidden_channels, output_channels, interpolation_method = 'cubic', sde = False, adjoint = True, dropout_p = 0.5, **kwargs):
         super(CDEModel, self).__init__()
-        torch.manual_seed(3)
+        #torch.manual_seed(3)
         self.func = F(input_channels,hidden_channels)
         self.interpolation_method = interpolation_method
         self.kwargs = kwargs
