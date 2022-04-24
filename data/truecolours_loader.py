@@ -1,6 +1,6 @@
 import json, pickle
-from truecolours_path import root, task
-#from data.truecolours_path import root, task
+from data.truecolours_path import root, task
+#from dissertation.data.truecolours_path import root, task
 from tqdm import tqdm
 import pandas as pd
 import numpy as np

@@ -3,6 +3,7 @@ sys.path.append('../')
 import torch,torchcde
 from neural_cdes.solver import cdeint as my_cdeint
 import numpy as np
+from neural_cdes.F import F
 
 #------------------------ CDE MODEL ---------------------------
 # Remember z_t = z_0 + int_0^t f_\theta(z_s) dX_s
@@ -10,56 +11,22 @@ import numpy as np
 # https://github.com/patrick-kidger/torchcde/blob/master/example/time_series_classification.py
 #--------------------------------------------------------------
 
-class F(torch.nn.Module):
-    '''
-    Defines the neural network denoted f_\theta in our neural CDE model
-    '''
-    def __init__(self, input_channels, hidden_channels):
-        '''
-        :param input_channels: the number of input channels in the data X. (Determined by the data.)
-        :param hidden_channels: the number of channels for z_t. (Determined by you!)
-        '''
-        #torch.manual_seed(3)
-        super(F, self).__init__()
-        self.input_channels = input_channels
-        self.hidden_channels = hidden_channels
-
-        self.linear1 = torch.nn.Linear(hidden_channels, 256)
-        self.linear2 = torch.nn.Linear(256, 256)
-        self.linear3 = torch.nn.Linear(256, input_channels * hidden_channels)
-
-    def forward(self, t, z):
-        '''
-        :param t: t is usually embedded in the data (if at all) but we can use it explicitly here also
-        :param z: input to the network & has shape (batch, hidden_channels)
-        :return: F(z)
-        '''
-        z = self.linear1(z)
-        z = z.relu()
-        z = self.linear2(z)
-        z = z.relu()
-        z = self.linear3(z)
-
-        # Tip from authors - best results tend to be obtained by adding a final tanh nonlinearity.
-        z = z.tanh()
-
-        # Ignoring the batch dimension, the shape of the output tensor must be a matrix,
-        # because we need it to represent a linear map from R^input_channels to R^hidden_channels.
-        z = z.view(z.size(0), self.hidden_channels, self.input_channels)
-        return z
-
 
 class CDEModel(torch.nn.Module):
     '''
     A class that packages up our function f into a model we can use and train
     '''
-    def __init__(self,input_channels, hidden_channels, output_channels, interpolation_method = 'cubic', sde = False, adjoint = True, dropout_p = 0.5, **kwargs):
+    def __init__(self,input_channels, hidden_channels, output_channels, interpolation_method = 'cubic', sde = False, adjoint = True, dropout_p = 0.5, output_uncertainty_bars = False, **kwargs):
         super(CDEModel, self).__init__()
         #torch.manual_seed(3)
         self.func = F(input_channels,hidden_channels)
         self.interpolation_method = interpolation_method
         self.kwargs = kwargs
         self.adjoint = adjoint
+        self.output_uncertainty_bars = output_uncertainty_bars
+
+        if output_uncertainty_bars:
+            output_channels = 3*output_channels # Additional 2 ouput per channel for upper & lower uncertainty
 
         # Init the initial and final transformations
         self.initial = torch.nn.Linear(input_channels, hidden_channels)
@@ -90,6 +57,8 @@ class CDEModel(torch.nn.Module):
 
         if self.interpolation_method == 'cubic':
             X = torchcde.CubicSpline(coeffs)
+        elif self.interpolation_method == 'linear':
+            X = torchcde.LinearInterpolation(coeffs)
 
         # 1. Get the initial hidden state
         X0 = X.evaluate(X.interval[0])
@@ -113,28 +82,6 @@ class CDEModel(torch.nn.Module):
         # 4. Reshape if needed
         if (self.backend == 'torchsde') and (num_stochastic_samples is not None):
             pred_y = pred_y.reshape(-1,num_stochastic_samples,*pred_y.shape[1:])
+        if self.output_uncertainty_bars:
+            pred_y = pred_y.reshape(*pred_y.shape[:-1],-1,3)
         return pred_y
-
-
-
-
-
-
-
-
-'''
-  class Model(torch.nn.Module):
-        def __init__(self):
-            super(Model, self).__init__()
-            self.initial = torch.nn.Linear(input_channels, hidden_channels)
-            self.func = F()
-            self.readout = torch.nn.Linear(hidden_channels, output_channels)
-
-        def forward(self, coeffs):
-            X = torchcde.CubicSpline(coeffs)
-            X0 = X.evaluate(X.interval[0])
-            z0 = self.initial(X0)
-            zt = torchcde.cdeint(X=X, func=self.func, z0=z0, t=X.interval)
-            zT = zt[..., -1, :]  # get the terminal value of the CDE
-            return self.readout(zT)
-'''

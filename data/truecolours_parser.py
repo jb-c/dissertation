@@ -1,7 +1,9 @@
 import sys
 sys.path.append('../')
 sys.path.append('../data')
-from truecolours_loader import load_and_parse_by_disease_from_pickle
+#from dissertation.data.truecolours_loader import load_and_parse_by_disease_from_pickle
+
+from data.truecolours_loader import load_and_parse_by_disease_from_pickle
 import numpy as np
 import pandas as pd
 
