@@ -41,7 +41,7 @@ def train(num_epochs=5,batch_size=20,save_every_k_epochs=1,**kwargs):
     if 'sde' not in kwargs:
         kwargs['sde'] = False
     if 'remove_time' not in kwargs:
-        kwargs['remove_time'] = True
+        kwargs['remove_time'] = False
     if 't_pinball' not in kwargs:
         kwargs['t_pinball'] = None
     if kwargs['t_pinball'] is not None:
@@ -67,11 +67,12 @@ def train(num_epochs=5,batch_size=20,save_every_k_epochs=1,**kwargs):
     if kwargs['interpolation_method'] == 'cubic':
         train_coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(X_train)
         test_coeffs  = torchcde.hermite_cubic_coefficients_with_backward_differences(X_test)
+    elif kwargs['interpolation_method'] == 'linear':
+        train_coeffs = torchcde.linear_interpolation_coeffs(X_train)
+        test_coeffs  = torchcde.linear_interpolation_coeffs(X_test)
     else:
         raise ValueError('Interpolation method not supported yet')
 
-    print(X_train.shape)
-    print(y_train.shape)
 
     train_dataset = torch.utils.data.TensorDataset(train_coeffs, y_train)
     test_dataset = torch.utils.data.TensorDataset(test_coeffs, y_test)
@@ -120,7 +121,7 @@ def train(num_epochs=5,batch_size=20,save_every_k_epochs=1,**kwargs):
                 main_loss  = torch.abs(batch_y - pred_y)
                 upper_loss = torch.max(qu*err_upper, (qu-1)*err_upper) # t-pinball loss for upper quartile loss
 
-                loss = 1.5*lower_loss.mean() + main_loss.mean() + 1.5*upper_loss.mean()
+                loss = lower_loss.mean() + main_loss.mean() + upper_loss.mean() # Total loss
             else:
                 loss = torch.abs(batch_y - pred_y).mean()
 

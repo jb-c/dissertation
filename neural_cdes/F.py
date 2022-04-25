@@ -2,12 +2,12 @@ import torch
 
 class F(torch.nn.Module):
     '''
-    Defines the neural network denoted f_\theta in our neural CDE model
+    Defines the neural network denoted f_{\theta} in our neural CDE model
     '''
     def __init__(self, input_channels, hidden_channels, width = 128):
         '''
-        :param input_channels: the number of input channels in the data X. (Determined by the data.)
-        :param hidden_channels: the number of channels for z_t. (Determined by you!)
+        :param input_channels: the number of input channels in the data X.
+        :param hidden_channels: the number of channels for z_t. (We use h = 32)
         '''
         #torch.manual_seed(3)
         super(F, self).__init__()
@@ -20,7 +20,7 @@ class F(torch.nn.Module):
 
     def forward(self, t, z):
         '''
-        :param t: t is usually embedded in the data (if at all) but we can use it explicitly here also
+        :param t: t is normally embedded in the data
         :param z: input to the network & has shape (batch, hidden_channels)
         :return: F(z)
         '''
@@ -30,7 +30,7 @@ class F(torch.nn.Module):
         z = z.tanh()
         z = self.linear3(z)
 
-        # Tip from authors - best results tend to be obtained by adding a final tanh nonlinearity.
+        # A final tanh non-linearity.
         z = z.tanh()
 
         # Ignoring the batch dimension, the shape of the output tensor must be a matrix,
